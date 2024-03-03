@@ -1,14 +1,14 @@
 package mr
 
 import (
+	"encoding/json"
 	"fmt"
+	"hash/fnv"
+	"io"
 	"log"
 	"net/rpc"
-	"hash/fnv"
 	"os"
-	"io"
 	"sort"
-	"encoding/json"
 )
 
 // Map functions return a slice of KeyValue.
@@ -58,35 +58,41 @@ func Worker(mapf func(string, string) []KeyValue,
 func doMapTask(task *MapTask, mapf func(string, string) []KeyValue) {
 	file, err := os.Open(task.FileName)
 	if err != nil {
-		log.Fatalf("cannot open %v", task.FileName)
+		log.Printf("open file: %v error", task.FileName)
 	}
+
 	content, err := io.ReadAll(file)
+
 	if err != nil {
-		log.Fatalf("cannot read %v", task.FileName)
+		log.Printf("read file: %v error", task.FileName)
 	}
 	file.Close()
 	kva := mapf(task.FileName, string(content))
-	omap := make([][]KeyValue, task.NReduce)
+	N2map := make([][]KeyValue, task.NReduce)
+
 	for _, kv := range kva {
 		i := ihash(kv.Key) % task.NReduce
-		omap[i] = append(omap[i], kv)
+		N2map[i] = append(N2map[i], kv)
 	}
 
-	for i, ikva := range omap {
-		intermediateFileName := fmt.Sprintf("mr-%d-%d.m", task.Id, i)
-		tmpfile, err := os.CreateTemp("./", "mr-*.tmp")
+	for i, ikva := range N2map {
+		intermediateFilename := fmt.Sprintf("mr-%d-%d", task.Id, i)
+		tmpFile, err := os.CreateTemp("./", "mr-*.tmp")
 		if err != nil {
 			log.Fatal(err)
 		}
-		encoder := json.NewEncoder(tmpfile)
+
+		encoder := json.NewEncoder(tmpFile)
 		for _, kv := range ikva {
-			err := encoder.Encode(&kv)
+			err := encoder.Encode(kv)
+
 			if err != nil {
-				log.Fatalf("cannot jsonencode %v", kv)
+				log.Fatalf("json.encode %v error", kv)
 			}
 		}
-		tmpfile.Close()
-		if err := os.Rename(tmpfile.Name(), intermediateFileName); err != nil {
+		tmpFile.Close()
+
+		if err := os.Rename(tmpFile.Name(), intermediateFilename); err != nil {
 			log.Fatal(err)
 		}
 	}
@@ -97,10 +103,12 @@ func doMapTask(task *MapTask, mapf func(string, string) []KeyValue) {
 func doReduceTask(task *ReduceTask, reducef func(string, []string) string) {
 	intermediate := []KeyValue{}
 	for i := 0; i < task.Nmap; i++ {
-		intermediateFileName := fmt.Sprintf("mr-%d-%d.m", i, task.Id)
-		file, err := os.Open(intermediateFileName)
+		intermediateFilename := fmt.Sprintf("mr-%d-%d", i, task.Id)
+
+		file, err := os.Open(intermediateFilename)
+
 		if err != nil {
-			log.Fatalf("cannot open %v", intermediateFileName)
+			log.Fatalf("open file: %v error", intermediateFilename)
 		}
 		decoder := json.NewDecoder(file)
 		for {
@@ -114,13 +122,15 @@ func doReduceTask(task *ReduceTask, reducef func(string, []string) string) {
 
 	sort.Sort(ByKey(intermediate))
 
-	tmpfile, err := os.CreateTemp("./", "mr-*.tmp")
+	
+	ofile, err := os.CreateTemp("./", "mr-*.tmp")
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	//
 	// call Reduce on each distinct key in intermediate[],
-	// and print the result to mr-out-id.
+	// and print the result to mr-out-0.
 	//
 	i := 0
 	for i < len(intermediate) {
@@ -135,13 +145,14 @@ func doReduceTask(task *ReduceTask, reducef func(string, []string) string) {
 		output := reducef(intermediate[i].Key, values)
 
 		// this is the correct format for each line of Reduce output.
-		fmt.Fprintf(tmpfile, "%v %v\n", intermediate[i].Key, output)
+		fmt.Fprintf(ofile, "%v %v\n", intermediate[i].Key, output)
 
 		i = j
 	}
 
-	tmpfile.Close()
-	if err := os.Rename(tmpfile.Name(), fmt.Sprintf("mr-out-%d.r", task.Id)); err != nil {
+	ofile.Close()
+
+	if err := os.Rename(ofile.Name(), fmt.Sprintf("mr-out-%d.r", task.Id)); err != nil {
 		log.Fatal(err)
 	}
 	callReduceTaskFinished(task.Id)
@@ -152,7 +163,6 @@ func callFetchTask() (*FetchTaskReply, bool) {
 	reply := FetchTaskReply{}
 	ok := call("Coordinator.FetchTask", &args, &reply)
 	return &reply, ok
-
 }
 
 func callMapTaskFinished(taskId int) (*TaskFinishedReply, bool) {
