@@ -16,7 +16,7 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 
 type ClientRecord struct {
 	value  string
-	req_id int64
+	req_id uint32
 }
 
 type KVServer struct {
@@ -44,8 +44,7 @@ func (kv *KVServer) Put(args *PutAppendArgs, reply *PutAppendReply) {
 	defer kv.mu.Unlock()
 
 	key, value, c_id, r_id := args.Key, args.Value, args.Clerk_Id, args.Req_Id
-	// clientId, rpcId := args.ClientId, args.RPCId
-	// prevVal, isDuplicate := kv.checkDuplicate(c_id, r_id)
+
 	var isDuplicate bool
 	var last_val string
 	last_record, ok := kv.clientRecords[c_id]
@@ -62,10 +61,7 @@ func (kv *KVServer) Put(args *PutAppendArgs, reply *PutAppendReply) {
 
 	kv.kv_pairs[key] = value
 
-	kv.clientRecords[c_id] = ClientRecord{
-		req_id: r_id,
-		value: "",
-	}
+	kv.clientRecords[c_id] = ClientRecord{value: "", req_id: r_id}
 
 }
 
@@ -76,23 +72,31 @@ func (kv *KVServer) Append(args *PutAppendArgs, reply *PutAppendReply) {
 
 	key, val, c_id, r_id := args.Key, args.Value, args.Clerk_Id, args.Req_Id
 
-	last_record, ok := kv.clientRecords[c_id]
-
 	var last_val string
+	var isDuplicate bool
+	last_record, record_ok := kv.clientRecords[c_id]
 
-	if !ok || last_record.req_id != r_id {
-		last_val = ""
+	if !record_ok || last_record.req_id != r_id {
+		last_val, isDuplicate = "", false
 	}
-	last_val = last_record.value
+	last_val, isDuplicate = last_record.value, true
 
-	kv.clientRecords[c_id] = ClientRecord{value: args.Value, req_id: r_id}
-	if ok {
-		kv.kv_pairs[key] = last_val + val
+	if isDuplicate {
 		reply.Value = last_val
+		return
+	}
+
+	cur_val, kv_ok := kv.kv_pairs[key]
+
+	if kv_ok {
+		kv.kv_pairs[key] = cur_val + val
+		reply.Value = cur_val
 	} else {
 		kv.kv_pairs[key] = val
 		reply.Value = ""
 	}
+
+	kv.clientRecords[c_id] = ClientRecord{value: cur_val, req_id: r_id}
 
 }
 

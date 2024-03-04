@@ -12,7 +12,7 @@ type Clerk struct {
 	server *labrpc.ClientEnd
 	// You will have to modify this struct.
 	id     int64
-	req_id int64
+	req_id uint32
 }
 
 func nrand() int64 {
@@ -72,7 +72,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) string {
 	} else {
 		return "Invalid Op"
 	}
-	ck.req_id++
+	ck.req_id += 1
 
 	args := PutAppendArgs{key, value, ck.id, ck.req_id}
 	reply := PutAppendReply{value}
