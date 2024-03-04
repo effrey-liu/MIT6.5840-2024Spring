@@ -44,10 +44,29 @@ func (kv *KVServer) Put(args *PutAppendArgs, reply *PutAppendReply) {
 	defer kv.mu.Unlock()
 
 	key, value, c_id, r_id := args.Key, args.Value, args.Clerk_Id, args.Req_Id
-	reply.Value = kv.kv_pairs[key]
-	kv.clientRecords[c_id] = ClientRecord{value, r_id}
-	kv.kv_pairs[key] = value
+	// clientId, rpcId := args.ClientId, args.RPCId
+	// prevVal, isDuplicate := kv.checkDuplicate(c_id, r_id)
+	var isDuplicate bool
+	var last_val string
+	last_record, ok := kv.clientRecords[c_id]
+
+	if !ok || last_record.req_id != r_id {
+		last_val, isDuplicate = "", false
+	}
+	last_val, isDuplicate = last_record.value, true
 	
+	if isDuplicate {
+		reply.Value = last_val
+		return
+	}
+
+	kv.kv_pairs[key] = value
+
+	kv.clientRecords[c_id] = ClientRecord{
+		req_id: r_id,
+		value: "",
+	}
+
 }
 
 func (kv *KVServer) Append(args *PutAppendArgs, reply *PutAppendReply) {
@@ -56,7 +75,7 @@ func (kv *KVServer) Append(args *PutAppendArgs, reply *PutAppendReply) {
 	defer kv.mu.Unlock()
 
 	key, val, c_id, r_id := args.Key, args.Value, args.Clerk_Id, args.Req_Id
-	
+
 	last_record, ok := kv.clientRecords[c_id]
 
 	var last_val string
@@ -65,7 +84,7 @@ func (kv *KVServer) Append(args *PutAppendArgs, reply *PutAppendReply) {
 		last_val = ""
 	}
 	last_val = last_record.value
-	
+
 	kv.clientRecords[c_id] = ClientRecord{value: args.Value, req_id: r_id}
 	if ok {
 		kv.kv_pairs[key] = last_val + val
@@ -75,7 +94,6 @@ func (kv *KVServer) Append(args *PutAppendArgs, reply *PutAppendReply) {
 		reply.Value = ""
 	}
 
-	
 }
 
 func StartKVServer() *KVServer {

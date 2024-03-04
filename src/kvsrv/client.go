@@ -72,7 +72,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) string {
 	} else {
 		return "Invalid Op"
 	}
-	// ck.req_id++
+	ck.req_id++
 
 	args := PutAppendArgs{key, value, ck.id, ck.req_id}
 	reply := PutAppendReply{value}
