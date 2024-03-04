@@ -43,14 +43,13 @@ func MakeClerk(server *labrpc.ClientEnd) *Clerk {
 // arguments. and reply must be passed as a pointer.
 func (ck *Clerk) Get(key string) string {
 	reply := GetReply{}
-	args := GetArgs{key, ck.id, ck.req_id}
+	args := GetArgs{key}
 	// ok := ck.server.Call("KVServer.Get", &args, reply)
 
+	// You will have to modify this function.
 	for !ck.server.Call("KVServer.Get", &args, &reply) {
 		DPrintf("resend Get Operation command\n")
 	}
-
-	// You will have to modify this function.
 	return reply.Value
 }
 
@@ -75,7 +74,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) string {
 	ck.req_id += 1
 
 	args := PutAppendArgs{key, value, ck.id, ck.req_id}
-	reply := PutAppendReply{value}
+	reply := PutAppendReply{}
 
 	for !ck.server.Call(targetOp, &args, &reply) {
 		DPrintf("resend %v command\n", targetOp)

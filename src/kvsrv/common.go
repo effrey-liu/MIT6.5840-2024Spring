@@ -18,8 +18,8 @@ type PutAppendReply struct {
 type GetArgs struct {
 	Key string
 	// You'll have to add definitions here.
-	Clerk_Id int64
-	Req_Id   uint32
+	// Clerk_Id int64
+	// Req_Id   uint32
 }
 
 type GetReply struct {

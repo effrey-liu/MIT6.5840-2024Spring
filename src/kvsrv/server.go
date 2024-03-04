@@ -45,15 +45,17 @@ func (kv *KVServer) Put(args *PutAppendArgs, reply *PutAppendReply) {
 
 	key, value, c_id, r_id := args.Key, args.Value, args.Clerk_Id, args.Req_Id
 
+	// check whether duplicate exists.
 	var isDuplicate bool
 	var last_val string
 	last_record, ok := kv.clientRecords[c_id]
 
 	if !ok || last_record.req_id != r_id {
 		last_val, isDuplicate = "", false
+	} else {
+		last_val, isDuplicate = last_record.value, true
 	}
-	last_val, isDuplicate = last_record.value, true
-	
+
 	if isDuplicate {
 		reply.Value = last_val
 		return
@@ -72,14 +74,16 @@ func (kv *KVServer) Append(args *PutAppendArgs, reply *PutAppendReply) {
 
 	key, val, c_id, r_id := args.Key, args.Value, args.Clerk_Id, args.Req_Id
 
+	// check whether duplicate exists.
 	var last_val string
 	var isDuplicate bool
 	last_record, record_ok := kv.clientRecords[c_id]
 
 	if !record_ok || last_record.req_id != r_id {
 		last_val, isDuplicate = "", false
+	} else {
+		last_val, isDuplicate = last_record.value, true
 	}
-	last_val, isDuplicate = last_record.value, true
 
 	if isDuplicate {
 		reply.Value = last_val
