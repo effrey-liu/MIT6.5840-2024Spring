@@ -497,7 +497,7 @@ func (rf *Raft) ticker() {
 		rf.mu.Unlock()
 		// pause for a random amount of time between 50 and 350
 		// milliseconds.
-		ms := 50 + (rand.Int63() % 300)
+		ms := 51 + (rand.Int63() % 300)
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 	}
 }
