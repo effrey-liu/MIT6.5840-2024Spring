@@ -417,9 +417,10 @@ func (rf *Raft) SendHeartBeats() {
 			Entries:      nil,
 			LeaderCommit: rf.commitIndex,
 		}
+		// rf.timeStamp = time.Now()
 		rf.mu.Unlock()
 
-		for i := 0; i < len(rf.peers) && i != rf.me; i++ {
+		for i := 0; i < len(rf.peers); i++ {
 			go rf.handleHeartBeat(i, args)
 		}
 
@@ -441,7 +442,7 @@ func (rf *Raft) collectVotes(sendTo int, args *RequestVoteArgs) {
 	if rf.voteCnt > len(rf.peers)/2 {
 		rf.mu.Lock()
 		if rf.role == Follower {
-			// 有另外一个投票的协程收到了更新的term而更改了自身状态为Follower
+			// there is another voting goroutine received updated term and changed this server to Follower
 			rf.mu.Unlock()
 			rf.voteMutex.Unlock()
 			return
@@ -497,7 +498,7 @@ func (rf *Raft) ticker() {
 		rf.mu.Unlock()
 		// pause for a random amount of time between 50 and 350
 		// milliseconds.
-		ms := 51 + (rand.Int63() % 300)
+		ms := 50 + (rand.Int63() % 300)
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 	}
 }
