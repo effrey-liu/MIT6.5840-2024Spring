@@ -379,7 +379,7 @@ func (rf *Raft) CommitChecker() {
 			rf.applyCh <- msg
 		}
 		rf.mu.Unlock()
-		time.Sleep(time.Duration(60) * time.Millisecond)
+		time.Sleep(time.Duration(10) * time.Millisecond)
 	}
 }
 
