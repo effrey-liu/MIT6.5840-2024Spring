@@ -1,0 +1,26 @@
+Test (3B): basic agreement ...
+--- FAIL: TestBasicAgree3B (0.55s)
+    test_test.go:137: some have committed before Start()
+Test (3B): RPC byte count ...
+--- FAIL: TestRPCBytes3B (0.81s)
+    test_test.go:167: got index 4 but expected 2
+Test (3B): test progressive failure of followers ...
+--- FAIL: TestFollowerFailure3B (3.04s)
+    test_test.go:213: expected index 4, got 53
+Test (3B): test failure of leaders ...
+--- FAIL: TestLeaderFailure3B (5.39s)
+    test_test.go:261: 3 committed but no majority
+Test (3B): agreement after follower reconnects ...
+--- FAIL: TestFailAgree3B (12.90s)
+    config.go:606: one(106) failed to reach agreement
+Test (3B): no agreement if too many followers disconnect ...
+--- FAIL: TestFailNoAgree3B (1.16s)
+    test_test.go:323: expected index 2, got 9
+Test (3B): concurrent Start()s ...
+  ... Passed --   0.9  3   16    4098   12
+Test (3B): rejoin of partitioned leader ...
+2024/03/18 23:50:19 1: log map[1:101 2:101 3:101 4:101 5:101 6:101 7:101]; server map[1:101 2:101 3:101 4:101 5:101 6:101 7:101 8:103 9:103 10:103 11:103 12:103 13:103]
+2024/03/18 23:50:19 1: log map[1:101 2:101 3:101 4:101 5:101 6:101 7:101]; server map[1:101 2:101 3:101 4:101 5:101 6:101 7:101 8:103 9:103 10:103 11:103 12:103]
+2024/03/18 23:50:19 apply error: commit index=8 server=1 101 != server=2 103
+exit status 1
+FAIL	6.5840/raft	27.014s

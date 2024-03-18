@@ -555,6 +555,7 @@ func (cfg *config) wait(index int, n int, startTerm int) interface{} {
 func (cfg *config) one(cmd interface{}, expectedServers int, retry bool) int {
 	t0 := time.Now()
 	starts := 0
+	// log.Printf("start cfg.one func\n")
 	for time.Since(t0).Seconds() < 10 && cfg.checkFinished() == false {
 		// try all the servers, maybe one is the leader.
 		index := -1
@@ -568,21 +569,24 @@ func (cfg *config) one(cmd interface{}, expectedServers int, retry bool) int {
 			cfg.mu.Unlock()
 			if rf != nil {
 				index1, _, ok := rf.Start(cmd)
+				// log.Printf("After start, index1 = %d\n", index1)
 				if ok {
 					index = index1
 					break
 				}
 			}
 		}
-
+		// log.Printf("testing index is whether normal, index = %d\n", index)
 		if index != -1 {
 			// somebody claimed to be the leader and to have
 			// submitted our command; wait a while for agreement.
 			t1 := time.Now()
+			// log.Printf("index for loop is next\n")
 			for time.Since(t1).Seconds() < 2 {
 				nd, cmd1 := cfg.nCommitted(index)
 				if nd > 0 && nd >= expectedServers {
 					// committed
+					// log.Printf("cmd1 != cmd\n")
 					if cmd1 == cmd {
 						// and it was the command we submitted.
 						return index
@@ -597,6 +601,7 @@ func (cfg *config) one(cmd interface{}, expectedServers int, retry bool) int {
 			time.Sleep(50 * time.Millisecond)
 		}
 	}
+	// log.Printf("cfg.checkFinished func is next\n")
 	if cfg.checkFinished() == false {
 		cfg.t.Fatalf("one(%v) failed to reach agreement", cmd)
 	}
