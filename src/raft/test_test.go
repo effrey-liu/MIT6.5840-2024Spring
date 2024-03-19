@@ -14,6 +14,7 @@ import "time"
 import "math/rand"
 import "sync/atomic"
 import "sync"
+import "log"
 
 // The tester generously allows solutions to complete elections in one second
 // (much more than the paper's range of timeouts).
@@ -134,6 +135,7 @@ func TestBasicAgree3B(t *testing.T) {
 	for index := 1; index < iters+1; index++ {
 		nd, _ := cfg.nCommitted(index)
 		if nd > 0 {
+			log.Printf("iter index = %d, nd = %d\n", index, nd)
 			t.Fatalf("some have committed before Start()")
 		}
 
@@ -274,7 +276,7 @@ func TestFailAgree3B(t *testing.T) {
 	cfg.begin("Test (3B): agreement after follower reconnects")
 
 	cfg.one(101, servers, false)
-
+	
 	// disconnect one follower from the network.
 	leader := cfg.checkOneLeader()
 	cfg.disconnect((leader + 1) % servers)
