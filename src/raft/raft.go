@@ -292,12 +292,11 @@ type AppendEntryArgs struct {
 }
 
 type AppendEntryReply struct {
-	Term          int  // currentTerm, for leader to update itself
-	Success       bool // true if follower contained entry matching prevLogIndex and prevLogTerm
-	ConflictTerm  int  // conflict term in Follower with corresponded Term in Leader Log
-	ConflictIndex int  // the first Log index corresponding to Leader Term in Follower
-	LogLen        int  // the length of Follower's log
-
+	Term    int  // currentTerm, for leader to update itself
+	Success bool // true if follower contained entry matching prevLogIndex and prevLogTerm
+	XTerm   int  // term in the conflicting entry (if any)
+	XIndex  int  // index of first entry with that term (if any)
+	XLen    int  // log length
 }
 
 func (rf *Raft) AppendEntries(args *AppendEntryArgs, reply *AppendEntryReply) {
@@ -329,17 +328,17 @@ func (rf *Raft) AppendEntries(args *AppendEntryArgs, reply *AppendEntryReply) {
 
 	// 2. Reply false if log doesn't contain an entry at prevLogIndex whose term matches prevLogTerm (§5.3)
 	if args.PrevLogIndex >= len(rf.log) {
-		reply.ConflictTerm = -1
-		reply.LogLen = len(rf.log)
+		reply.XTerm = -1
+		reply.XLen = len(rf.log)
 		isConflict = true
 		// DPrintf("server%d's log doesn't exist log entry in PrevLogIndex %d, LogLen is %d\n", rf.me, args.PrevLogIndex, reply.LogLen)
 	} else if rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
-		reply.ConflictTerm = rf.log[args.PrevLogIndex].Term
+		reply.XTerm = rf.log[args.PrevLogIndex].Term
 		i := args.PrevLogIndex
-		for rf.log[i].Term == reply.ConflictTerm {
+		for rf.log[i].Term == reply.XTerm {
 			i--
 		}
-		reply.ConflictIndex = i + 1
+		reply.XIndex = i + 1
 		isConflict = true
 	}
 
@@ -351,18 +350,22 @@ func (rf *Raft) AppendEntries(args *AppendEntryArgs, reply *AppendEntryReply) {
 
 	// 3. If an existing entry conflicts with a new one (same index but different terms),
 	// 	  delete the existing entry and all that follow it (§5.3)
-	if len(args.Entries) != 0 && len(rf.log) > args.PrevLogIndex+1 && rf.log[args.PrevLogIndex+1].Term != args.Entries[0].Term {
-		/*
-			leader: 1 2 5
-			s1	  : 1 2 3 4
-			make s1 beacome: 1 2
-			and then in rule 4, append 5 into s1
-		*/
-		DPrintf("violate the rule3, delete the existing entry and all that follow it\n")
-		rf.log = rf.log[:args.PrevLogIndex+1]
-	}
 	// 4. Append any new entries not already in the log
-	rf.log = append(rf.log, args.Entries...)
+	for idx, log := range args.Entries {
+		ridx := args.PrevLogIndex + 1 + idx
+		if ridx < len(rf.log) && rf.log[ridx].Term != log.Term {
+			// some positions in log conflict, cover all log entries from this ridx.
+			DPrintf("violate the rule3, delete the existing entry and all that follow it\n")
+			rf.log = rf.log[:ridx]
+			rf.log = append(rf.log, args.Entries[idx:]...)
+			break
+		} else if ridx == len(rf.log) {
+			// no conflicts, but log's len is bigger, put together.
+			rf.log = append(rf.log, args.Entries[idx:]...)
+			break
+		}
+	}
+
 	rf.persist()
 
 	reply.Success = true
@@ -545,20 +548,20 @@ func (rf *Raft) handleAppendEntries(sendTo int, args *AppendEntryArgs) {
 		// one AppendEntries RPC will be required for each term with conflicting entries, rather than one RPC per entry.
 		// In practice, we doubt this optimization is necessary,
 		// since failures happen infrequently and it is unlikely that there will be many inconsistent entries.
-		
+
 		// handle conflict in AppendEntries
-		if appendReply.ConflictTerm == -1 {
-			rf.nextIndex[sendTo] = appendReply.LogLen
+		if appendReply.XTerm == -1 {
+			rf.nextIndex[sendTo] = appendReply.XLen
 			return
 		}
 		i := rf.nextIndex[sendTo] - 1
-		for i > 0 && rf.log[i].Term > appendReply.ConflictTerm {
+		for i > 0 && rf.log[i].Term > appendReply.XTerm {
 			i--
 		}
-		if rf.log[i].Term == appendReply.ConflictTerm {
+		if rf.log[i].Term == appendReply.XTerm {
 			rf.nextIndex[sendTo] = i + 1
 		} else {
-			rf.nextIndex[sendTo] = appendReply.ConflictIndex
+			rf.nextIndex[sendTo] = appendReply.XIndex
 		}
 		return
 	}
@@ -587,8 +590,8 @@ func (rf *Raft) SendHeartBeats() {
 				PrevLogTerm:  rf.log[rf.nextIndex[i]-1].Term,
 				LeaderCommit: rf.commitIndex,
 			}
-			if len(rf.log)-1 >= rf.nextIndex[i] {
-				args.Entries = rf.log[rf.nextIndex[i]:]
+			if len(rf.log)-1 > args.PrevLogIndex {
+				args.Entries = rf.log[args.PrevLogIndex+1:]
 				DPrintf("detect entries need to be appended\n")
 			} else {
 				args.Entries = make([]Entry, 0)
@@ -708,15 +711,16 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.matchIndex = make([]int, len(peers))
 	rf.timeStamp = time.Now()
 	rf.role = Follower
+	rf.lastApplied = 0
 	rf.applyCh = applyCh
 	rf.applyCond = sync.NewCond(&rf.mu)
 
-	for i := 0; i < len(rf.nextIndex); i++ {
-		rf.nextIndex[i] = 1
-	}
-
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
+
+	for i := 0; i < len(rf.nextIndex); i++ {
+		rf.nextIndex[i] = len(rf.log)
+	}
 
 	// start ticker goroutine to start elections
 	go rf.ticker()

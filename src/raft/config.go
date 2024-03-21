@@ -143,6 +143,7 @@ func (cfg *config) checkLogs(i int, m ApplyMsg) (string, bool) {
 	v := m.Command
 	for j := 0; j < len(cfg.logs); j++ {
 		if old, oldok := cfg.logs[j][m.CommandIndex]; oldok && old != v {
+			// log.Printf("checkLogs debug info\n")
 			log.Printf("%v: log %v; server %v\n", i, cfg.logs[i], cfg.logs[j])
 			// some server has already committed a different value for this entry!
 			err_msg = fmt.Sprintf("commit index=%v server=%v %v != server=%v %v",
@@ -168,6 +169,7 @@ func (cfg *config) applier(i int, applyCh chan ApplyMsg) {
 			err_msg, prevok := cfg.checkLogs(i, m)
 			cfg.mu.Unlock()
 			if m.CommandIndex > 1 && prevok == false {
+				// log.Printf("applier debug info\n")
 				err_msg = fmt.Sprintf("server %v apply out of order %v", i, m.CommandIndex)
 			}
 			if err_msg != "" {
