@@ -8,14 +8,14 @@ fail_count=0
 # 设置测试次数
 max_tests=50
 
-rm -rf test_result4A.log
+rm -rf test_result4.log
 
 for ((i=1; i<=max_tests; i++))
 do
     echo "Running test iteration $i of $max_tests..."
     
     # 运行 go 测试命令
-    go test -run 4A &> test_result4A.log
+    go test -run 4 &> test_result4.log
     
     # 检查 go 命令的退出状态
     if [ "$?" -eq 0 ]; then
@@ -26,7 +26,7 @@ do
         # 测试失败
         fail_count=$((fail_count+1))
         echo "Test iteration $i failed, check 'failure4X.log' for details."
-        mv test_result4A.log "failure4A_$i.log"
+        mv test_result4.log "failure4_$i.log"
     fi
 done
 

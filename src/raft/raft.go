@@ -393,7 +393,12 @@ func (rf *Raft) AppendEntries(args *AppendEntryArgs, reply *AppendEntryReply) {
 	isConflict := false
 
 	// 2. Reply false if log doesn't contain an entry at prevLogIndex whose term matches prevLogTerm (§5.3)
-	if args.PrevLogIndex >= rf.GlobalIndex(len(rf.log)) {
+	if args.PrevLogIndex < rf.lastIncludedIndex {
+		// outdated RPC, its's PrevLogIndex < lastIncludedIndex
+		reply.Success = true
+		reply.Term = rf.currentTerm
+		return
+	} else if args.PrevLogIndex >= rf.GlobalIndex(len(rf.log)) {
 		reply.XTerm = -1
 		reply.XLen = rf.GlobalIndex(len(rf.log))
 		isConflict = true
@@ -804,7 +809,8 @@ func (rf *Raft) handleAppendEntries(sendTo int, args *AppendEntryArgs) {
 		// handle conflict in AppendEntries
 		if appendReply.XTerm == -1 {
 			if rf.lastIncludedIndex >= appendReply.XLen {
-				go rf.handleInstallSnapshot(sendTo)
+				// go rf.handleInstallSnapshot(sendTo)
+				rf.nextIndex[sendTo] = rf.lastIncludedIndex
 			} else {
 				rf.nextIndex[sendTo] = appendReply.XLen
 			}
@@ -820,14 +826,16 @@ func (rf *Raft) handleAppendEntries(sendTo int, args *AppendEntryArgs) {
 		}
 		if i == rf.lastIncludedIndex && rf.log[rf.RealLogIndex(i)].Term > appendReply.XTerm {
 			// still not found in current log, sned InstallSnapshot RPC to get earlier log and find.
-			go rf.handleInstallSnapshot(sendTo)
+			// go rf.handleInstallSnapshot(sendTo)
+			rf.nextIndex[sendTo] = rf.lastIncludedIndex
 		} else if rf.log[rf.RealLogIndex(i)].Term == appendReply.XTerm {
 			rf.nextIndex[sendTo] = i + 1
 		} else {
 			// now: i != rf.lastIncludedIndex || rf.log[rf.RealLogIndex(i)].Term < appendReply.Xterm
 			if appendReply.XIndex <= rf.lastIncludedIndex {
 				// indicate that Prev Snapshot logs may have PrevLogIndex.
-				go rf.handleInstallSnapshot(sendTo)
+				// go rf.handleInstallSnapshot(sendTo)
+				rf.nextIndex[sendTo] = rf.lastIncludedIndex
 			} else {
 				rf.nextIndex[sendTo] = appendReply.XIndex
 			}

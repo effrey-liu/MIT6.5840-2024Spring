@@ -5,6 +5,7 @@ import (
 	"math/big"
 
 	"6.5840/labrpc"
+	"time"
 )
 
 type Clerk struct {
@@ -53,6 +54,7 @@ func (ck *Clerk) Get(key string) string {
 		if !ok {
 			DPrintf("resend Get Operation request\n")
 			ck.leaderId = (ck.leaderId + 1) % len(ck.servers)
+			time.Sleep(20 * time.Millisecond)
 			continue
 		}
 
@@ -61,12 +63,16 @@ func (ck *Clerk) Get(key string) string {
 			return reply.Value
 		case ErrWrongLeader:
 			ck.leaderId = (ck.leaderId + 1) % len(ck.servers)
+			time.Sleep(20 * time.Millisecond)
 			continue
 		case ErrTimeout:
+			time.Sleep(20 * time.Millisecond)
 			continue
 		case ErrHandleOpTimeout:
+			time.Sleep(20 * time.Millisecond)
 			continue
 		case ErrChanClosed:
+			time.Sleep(20 * time.Millisecond)
 			continue
 		case ErrNoKey:
 			return reply.Value
@@ -95,6 +101,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 		if !ok {
 			DPrintf("resend PutAppend Request\n")
 			ck.leaderId = (ck.leaderId + 1) % len(ck.servers)
+			time.Sleep(20 * time.Millisecond)
 			continue
 		}
 
@@ -103,12 +110,16 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 			return
 		case ErrWrongLeader:
 			ck.leaderId = (ck.leaderId + 1) % len(ck.servers)
+			time.Sleep(20 * time.Millisecond)
 			continue
 		case ErrTimeout:
+			time.Sleep(20 * time.Millisecond)
 			continue
 		case ErrHandleOpTimeout:
+			time.Sleep(20 * time.Millisecond)
 			continue
 		case ErrChanClosed:
+			time.Sleep(20 * time.Millisecond)
 			continue
 		case ErrNoKey:
 			return

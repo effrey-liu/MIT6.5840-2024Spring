@@ -9,13 +9,22 @@ import (
 	"6.5840/labrpc"
 	"6.5840/raft"
 
+	"bytes"
 	"time"
 )
 
 const Debug = false
+const Specific = true
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
 	if Debug {
+		log.Printf(format, a...)
+	}
+	return
+}
+
+func SPrintf(format string, a ...interface{}) (n int, err error) {
+	if Specific {
 		log.Printf(format, a...)
 	}
 	return
@@ -53,13 +62,20 @@ type KVServer struct {
 	// Your definitions here.
 	kvDB           map[string]string // Database on KVServer, storing key-value pairs.
 	logLastApplied int               // 此kvserver apply的上一个日志的index
-	maxMapLen      int
 	waiCh          map[int]*chan Result
 	historyMap     map[int64]*Result
+	persister      *raft.Persister
 }
 
 func (kv *KVServer) handleOp(opArgs *Op) (res Result) {
-	startIndex, startTerm, isleader := kv.rf.Start(opArgs)
+	kv.mu.Lock()
+	if hisMap, exist := kv.historyMap[opArgs.ClientId]; exist && hisMap.LastSeqNum == opArgs.SequenceNum {
+		kv.mu.Unlock()
+		return *hisMap
+	}
+	kv.mu.Unlock()
+
+	startIndex, startTerm, isleader := kv.rf.Start(*opArgs)
 	if !isleader {
 		return Result{Err: ErrWrongLeader, Value: ""}
 	}
@@ -102,12 +118,6 @@ func (kv *KVServer) handleOp(opArgs *Op) (res Result) {
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
-	_, isleader := kv.rf.GetState()
-	if !isleader {
-		reply.Err = ErrWrongLeader
-		return
-	}
-
 	opArgs := &Op{OpType: "Get", SequenceNum: args.Seq_Num, Key: args.Key, ClientId: args.Clerk_Id}
 
 	res := kv.handleOp(opArgs)
@@ -120,12 +130,6 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 // this is already reflected in the PutAppendReply struct.
 func (kv *KVServer) Put(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
-	_, isleader := kv.rf.GetState()
-	if !isleader {
-		reply.Err = ErrWrongLeader
-		return
-	}
-
 	opArgs := &Op{OpType: args.Op, SequenceNum: args.Seq_Num, Key: args.Key, Value: args.Value, ClientId: args.Clerk_Id}
 
 	res := kv.handleOp(opArgs)
@@ -134,12 +138,6 @@ func (kv *KVServer) Put(args *PutAppendArgs, reply *PutAppendReply) {
 
 func (kv *KVServer) Append(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
-	_, isleader := kv.rf.GetState()
-	if !isleader {
-		reply.Err = ErrWrongLeader
-		return
-	}
-
 	opArgs := &Op{OpType: args.Op, SequenceNum: args.Seq_Num, Key: args.Key, Value: args.Value, ClientId: args.Clerk_Id}
 
 	res := kv.handleOp(opArgs)
@@ -165,34 +163,29 @@ func (kv *KVServer) killed() bool {
 	return z == 1
 }
 
-func (kv *KVServer) DBExecute(op *Op, isleader bool) (res Result) {
+func (kv *KVServer) DBExecute(op *Op) (res Result) {
 	res.LastSeqNum = op.SequenceNum
 	switch op.OpType {
 	case "Get":
 		val, exist := kv.kvDB[op.Key]
 		if exist {
-			// kv.LogInfoDBExecute(op, "", val, isLeader)
 			res.Value = val
 			return
 		} else {
 			res.Err = ErrNoKey
 			res.Value = ""
-			// kv.LogInfoDBExecute(op, "", ErrKeyNotExist, isLeader)
 			return
 		}
 	case "Put":
 		kv.kvDB[op.Key] = op.Value
-		// kv.LogInfoDBExecute(op, "", kv.db[op.Key], isLeader)
 		return
 	case "Append":
 		val, exist := kv.kvDB[op.Key]
 		if exist {
 			kv.kvDB[op.Key] = val + op.Value
-			// kv.LogInfoDBExecute(op, "", kv.db[op.Key], isLeader)
 			return
 		} else {
 			kv.kvDB[op.Key] = op.Value
-			// kv.LogInfoDBExecute(op, "", kv.db[op.Key], isLeader)
 			return
 		}
 	}
@@ -217,6 +210,14 @@ func (kv *KVServer) ApplyChanHandler() {
 			// 	continue
 			// }
 			kv.mu.Lock()
+
+			if log.CommandIndex <= kv.logLastApplied {
+				kv.mu.Unlock()
+				continue
+			}
+
+			kv.logLastApplied = log.CommandIndex
+
 			var res Result
 			needApply := false
 
@@ -229,43 +230,80 @@ func (kv *KVServer) ApplyChanHandler() {
 			} else {
 				needApply = true
 			}
-			_, isleader := kv.rf.GetState()
 
 			if needApply {
-				res = kv.DBExecute(&op, isleader)
+				res = kv.DBExecute(&op)
 				res.ApplyTerm = log.SnapshotTerm
 
 				kv.historyMap[op.ClientId] = &res
 			}
 
-			if !isleader {
-				kv.mu.Unlock()
-				continue
-			}
 			ch, exist := kv.waiCh[log.CommandIndex]
 
-			if !exist {
-				// receiver closed corresponding channel, which means this is a repeat request.
+			if exist {
 				kv.mu.Unlock()
-				continue
+
+				res.ApplyTerm = log.SnapshotTerm
+				*ch <- res // maybe incur panic if this channel is closed. use below to detect panic:
+				// receiver closed corresponding channel, which means this is a repeat request.
+				/*
+					func() {
+						defer func() {
+							if recover() != nil {
+								// if occurs panic，because the channel is closed
+								DPrintf("channel closed.")
+							}
+						}()
+						res.ApplyTerm= log.SnapshotTerm
+						*ch <- res
+					}()
+				*/
+
+				kv.mu.Lock()
+			}
+
+			// snapshot logic
+			if kv.maxraftstate != -1 && float32(kv.persister.RaftStateSize()) / float32(kv.maxraftstate) >= 0.9 {
+				// SPrintf("snapshot on server %v, current ratio: %v", kv.me, float32(kv.persister.RaftStateSize()) / float32(kv.maxraftstate))
+				snapShot := kv.GetSnapshot()
+				kv.rf.Snapshot(log.CommandIndex, snapShot)
 			}
 			kv.mu.Unlock()
-
-			res.ApplyTerm = log.SnapshotTerm
-			*ch <- res	// maybe incur panic if this channel is closed. use below to detect panic:
-			/*
-			func() {
-				defer func() {
-					if recover() != nil {
-						// if occurs panic，because the channel is closed
-						DPrintf("channel closed.")
-					}
-				}()
-				res.ApplyTerm = log.SnapshotTerm
-				*ch <- res
-			}()
-			*/
+		} else if log.SnapshotValid {
+			kv.mu.Lock()
+			if log.SnapshotIndex >= kv.logLastApplied {
+				kv.LoadSnapshot(log.Snapshot)
+				kv.logLastApplied = log.SnapshotIndex
+			}
+			kv.mu.Unlock()
 		}
+	}
+}
+
+func (kv *KVServer) GetSnapshot() []byte {
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	// lab3C
+	e.Encode(kv.kvDB)
+	e.Encode(kv.historyMap)
+	snapshot := w.Bytes()
+	return snapshot
+}
+
+func (kv *KVServer) LoadSnapshot(snapshot []byte) {
+	if len(snapshot) == 0 || snapshot == nil {
+		return
+	}
+	r := bytes.NewBuffer(snapshot)
+	d := labgob.NewDecoder(r)
+
+	kvDB := make(map[string]string)
+	historyMap := make(map[int64]*Result)
+	if d.Decode(&kvDB) != nil || d.Decode(&historyMap) != nil {
+		DPrintf("readPersist failed\n")
+	} else {
+		kv.kvDB = kvDB
+		kv.historyMap = historyMap
 	}
 }
 
@@ -296,9 +334,14 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	// You may need initialization code here.
+	kv.persister = persister
 	kv.historyMap = make(map[int64]*Result)
 	kv.kvDB = make(map[string]string)
 	kv.waiCh = make(map[int]*chan Result)
+
+	kv.mu.Lock()
+	kv.LoadSnapshot(persister.ReadSnapshot())
+	kv.mu.Unlock()
 
 	go kv.ApplyChanHandler()
 	return kv
