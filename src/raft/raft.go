@@ -63,7 +63,7 @@ const (
 	Candidate Role = 1
 	Leader    Role = 2
 )
-const HeartBeatTime int = 113
+const HeartbeatTime int = 113
 
 // A Go object implementing a single Raft peer.
 type Raft struct {
@@ -74,6 +74,9 @@ type Raft struct {
 	dead      int32               // set by Kill()
 
 	// Your data here (3A, 3B, 3C).
+	voteTimer      *time.Timer	// for lab4A time test
+	heartbeatTimer *time.Timer
+
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
 	// Persistent state on all servers:
@@ -107,6 +110,16 @@ type Raft struct {
 	lastIncludedIndex int // highest index of log
 	lastIncludedTerm  int // highest Term of log
 }
+
+func (rf *Raft) ResetVoteTimer() {
+	randomElectionTimeout := rand.Int63()%51 + 250
+	rf.voteTimer.Reset(time.Duration(randomElectionTimeout) * time.Millisecond)
+}
+
+func (rf *Raft) ResetHeartbeatTimer(timeStamp int) {
+	rf.heartbeatTimer.Reset(time.Duration(timeStamp) * time.Millisecond)
+}
+
 
 // accounding to global Index is increasing,
 // get Real log Index by using this func.
@@ -285,7 +298,8 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			reply.Term = rf.currentTerm
 			rf.votedFor = args.CandidateId
 			rf.role = Follower
-			rf.timeStamp = time.Now()
+			// rf.timeStamp = time.Now()
+			rf.ResetVoteTimer()
 			rf.persist()
 			reply.VoteGranted = true
 			DPrintf("server %d voted for Candidate %d", rf.me, args.CandidateId)
@@ -360,7 +374,8 @@ func (rf *Raft) AppendEntries(args *AppendEntryArgs, reply *AppendEntryReply) {
 		return
 	}
 
-	rf.timeStamp = time.Now()
+	rf.ResetVoteTimer()
+	// rf.timeStamp = time.Now()
 	// rf.log[args.leaderCommit].Term = args.lead
 	if args.Term > rf.currentTerm {
 		rf.currentTerm = args.Term
@@ -467,7 +482,12 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.log = append(rf.log, newEntry)
 	// log.Printf("I'm Leader, but len(rf.log) = %d\n", len(rf.log))
 	rf.persist()
-	rf.timeStamp = time.Now()
+	// rf.timeStamp = time.Now()
+
+	defer func() {
+		rf.ResetHeartbeatTimer(1)
+	}()
+
 	return rf.GlobalIndex(len(rf.log) - 1), rf.currentTerm, true
 }
 
@@ -589,7 +609,9 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 		rf.votedFor = -1
 	}
 	rf.role = Follower
-	rf.timeStamp = time.Now()
+	rf.ResetVoteTimer()
+	// rf.timeStamp = time.Now()
+
 	// 2. Create new snapshot file if first chunk (offset is 0)
 	// 3. Write data into snapshot file at given offset
 	// 4. Reply and wait for more data chunks if done is false
@@ -668,7 +690,8 @@ func (rf *Raft) handleInstallSnapshot(sendTo int) {
 		rf.currentTerm = reply.Term
 		rf.role = Follower
 		rf.votedFor = -1
-		rf.timeStamp = time.Now()
+		// rf.timeStamp = time.Now()
+		rf.ResetVoteTimer()
 		rf.persist()
 		return
 	}
@@ -760,7 +783,8 @@ func (rf *Raft) handleAppendEntries(sendTo int, args *AppendEntryArgs) {
 		rf.currentTerm = appendReply.Term
 		rf.votedFor = -1
 		rf.role = Follower
-		rf.timeStamp = time.Now()
+		// rf.timeStamp = time.Now()
+		rf.ResetVoteTimer()
 		rf.persist()
 		return
 	}
@@ -816,6 +840,7 @@ func (rf *Raft) SendHeartBeats() {
 	DPrintf("server %v start sending heartbeats\n", rf.me)
 
 	for !rf.killed() {
+		<-rf.heartbeatTimer.C
 		rf.mu.Lock()
 		// if the server is dead or is not the leader, just return
 		if rf.role != Leader {
@@ -858,7 +883,8 @@ func (rf *Raft) SendHeartBeats() {
 		}
 
 		rf.mu.Unlock()
-		time.Sleep(time.Duration(HeartBeatTime) * time.Millisecond)
+		// time.Sleep(time.Duration(HeartbeatTime) * time.Millisecond)
+		rf.ResetHeartbeatTimer(HeartbeatTime)
 	}
 }
 
@@ -931,17 +957,20 @@ func (rf *Raft) ticker() {
 
 		// If a follower receives no communication over a period of time called the **election timeout**,
 		// then it assumes there is no viable leader and begins an election to choose a new leader.
-		randomElectionTimeout := rand.Int63()%51 + 250
+		// randomElectionTimeout := rand.Int63()%51 + 250
+		<- rf.voteTimer.C
 		rf.mu.Lock()
-		if rf.role != Leader && time.Since(rf.timeStamp) > time.Duration(randomElectionTimeout)*time.Millisecond {
+		// if rf.role != Leader && time.Since(rf.timeStamp) > time.Duration(randomElectionTimeout)*time.Millisecond {
+		if rf.role != Leader {
 			// start Election
 			go rf.Election()
 		}
+		rf.ResetVoteTimer()
 		rf.mu.Unlock()
 		// pause for a random amount of time between 50 and 350
 		// milliseconds.
-		ms := 50 + (rand.Int63() % 300)
-		time.Sleep(time.Duration(ms) * time.Millisecond)
+		// ms := 50 + (rand.Int63() % 300)
+		// time.Sleep(time.Duration(ms) * time.Millisecond)
 	}
 }
 
@@ -971,6 +1000,9 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.lastApplied = 0
 	rf.applyCh = applyCh
 	// rf.applyCond = sync.NewCond(&rf.mu)
+	rf.voteTimer = time.NewTimer(0)
+	rf.heartbeatTimer = time.NewTimer(0)
+	rf.ResetVoteTimer()
 
 	// initialize from state persisted before a crash
 	rf.readSnapshot(persister.ReadSnapshot())
