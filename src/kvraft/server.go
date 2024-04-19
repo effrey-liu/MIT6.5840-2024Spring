@@ -243,25 +243,22 @@ func (kv *KVServer) ApplyChanHandler() {
 			if exist {
 				kv.mu.Unlock()
 
-				res.ApplyTerm = log.SnapshotTerm
-				*ch <- res // maybe incur panic if this channel is closed. use below to detect panic:
-				// receiver closed corresponding channel, which means this is a repeat request.
-				/*
-					func() {
-						defer func() {
-							if recover() != nil {
-								// if occurs panic，because the channel is closed
-								DPrintf("channel closed.")
-							}
-						}()
-						res.ApplyTerm= log.SnapshotTerm
-						*ch <- res
+				// res.ApplyTerm = log.SnapshotTerm
+				// *ch <- res // maybe incur panic if this channel is closed. use below to detect panic:
+				func() {
+					defer func() {
+						if recover() != nil {
+							// if occurs panic，because the channel is closed
+							DPrintf("channel closed.")
+						}
 					}()
-				*/
+					res.ApplyTerm= log.SnapshotTerm
+					*ch <- res
+				}()
 
 				kv.mu.Lock()
 			}
-
+			// !exist: receiver closed corresponding channel, which means this is a repeat request.
 			// snapshot logic
 			if kv.maxraftstate != -1 && float32(kv.persister.RaftStateSize()) / float32(kv.maxraftstate) >= 0.9 {
 				// SPrintf("snapshot on server %v, current ratio: %v", kv.me, float32(kv.persister.RaftStateSize()) / float32(kv.maxraftstate))
